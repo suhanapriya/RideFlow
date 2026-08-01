@@ -1,0 +1,51 @@
+run:
+  timeout: 5m
+  go: "1.24"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errorlint
+    - gocritic
+    - gosec
+    - prealloc
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+    - bodyclose
+
+issues:
+  exclude-dirs:
+    - vendor
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*_mock\\.go$"
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+  max-issues-per-linter: 50
+  sort-results: true
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+      - name: unexported-return
+  gosec:
+    excludes:
+      - G104 # unhandled errors in deferred calls
+      - G304 # file path from variable
+  gocritic:
+    enabled-checks:
+      - diagnostic
+      - style
+      - performance

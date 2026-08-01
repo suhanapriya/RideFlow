@@ -21,15 +21,22 @@ COPY . .
 
 # Build argument for service name
 ARG SERVICE_NAME
+ARG VERSION
+ARG BUILD_TIME
 
 # Build the service
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/service ./cmd/${SERVICE_NAME}
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags "-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" -o /app/service ./cmd/${SERVICE_NAME}
 
 # Final stage
-FROM alpine:latest
+FROM alpine:3.20
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates for HTTPS and wget for healthcheck
+RUN apk --no-cache add ca-certificates wget
+
+# Add LABEL instructions
+LABEL maintainer="Uber Team" \
+      service.name="${SERVICE_NAME}" \
+      version="${VERSION}"
 
 # Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -44,6 +51,10 @@ USER appuser
 
 # Expose port
 EXPOSE 8080
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"] || exit 1
 
 # Run the service
 CMD ["./service"]

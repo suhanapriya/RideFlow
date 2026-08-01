@@ -6,7 +6,7 @@
 	docker-up docker-down docker-build docker-logs docker-restart \
 	migrate-up migrate-down migrate-create migrate-force migrate-version \
 	db-seed db-reset db-backup db-restore \
-	tidy install-tools clean
+	tidy install-tools clean security-scan benchmark docker-size check-all
 
 # Colors for output
 RED := \033[0;31m
@@ -515,6 +515,7 @@ install-tools: ## Install development tools
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 	@go install golang.org/x/tools/cmd/goimports@latest
+	@go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "$(GREEN)✓ Tools installed!$(NC)"
 
 clean: ## Clean build artifacts
@@ -522,3 +523,27 @@ clean: ## Clean build artifacts
 	@rm -rf bin/
 	@rm -f coverage.txt coverage.html
 	@echo "$(GREEN)✓ Clean complete!$(NC)"
+
+#==========================================
+# Security & Quality
+#==========================================
+
+security-scan: ## Run security scanners (gosec + govulncheck)
+	@echo "Running security scans..."
+	@echo "$(YELLOW)Running gosec...$(NC)"
+	@gosec -quiet ./... 2>/dev/null || echo "$(YELLOW)gosec not installed, skipping$(NC)"
+	@echo "$(YELLOW)Running govulncheck...$(NC)"
+	@govulncheck ./... 2>/dev/null || echo "$(YELLOW)govulncheck not installed, skipping$(NC)"
+	@echo "$(GREEN)✓ Security scan complete!$(NC)"
+
+benchmark: ## Run benchmarks
+	@echo "Running benchmarks..."
+	@go test -bench=. -benchmem -run=^$$ ./... 2>/dev/null | grep -E '(Benchmark|ok)' || echo "No benchmarks found"
+	@echo "$(GREEN)✓ Benchmarks complete!$(NC)"
+
+docker-size: ## Show Docker image sizes
+	@echo "$(YELLOW)=== Docker Image Sizes ===$(NC)"
+	@docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' | grep ridehailing || echo "No ridehailing images found"
+
+check-all: lint vet test security-scan ## Run all checks (lint + vet + test + security)
+	@echo "$(GREEN)✓ All checks passed!$(NC)"

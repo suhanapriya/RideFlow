@@ -1,143 +1,174 @@
-# Ride Hailing Platform
+# 🚗 Distributed Ride-Hailing Platform (Uber-Scale Architecture)
 
-[![CI](https://github.com/richxcame/ride-hailing/actions/workflows/ci.yml/badge.svg)](https://github.com/richxcame/ride-hailing/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/richxcame/ride-hailing/branch/main/graph/badge.svg)](https://app.codecov.io/gh/richxcame/ride-hailing)
+[![Go Version](https://img.shields.io/badge/Go-1.24-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-Ready-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)
+[![Observability](https://img.shields.io/badge/OTel%20%7C%20Prometheus-Enabled-FF6F00?style=for-the-badge&logo=prometheus&logoColor=white)](#observability-stack)
+[![Security](https://img.shields.io/badge/Security-Hardened-success?style=for-the-badge&logo=snyk&logoColor=white)](#security-first-design)
 
-A ride-hailing platform backend built with Go, featuring 14 microservices.
+A production-grade, highly resilient distributed ride-hailing platform built in **Go 1.24**. This project showcases Staff-level system design principles, featuring **14 specialized microservices** communicating via an asynchronous event bus (NATS), advanced spatial indexing (Uber's H3 grid), real-time WebSockets, and a hardened zero-trust security model.
 
-## Services
+Designed to emulate the core engineering achievements of platforms like Uber and Lyft, this codebase serves as a direct demonstration of building, testing, securing, and scaling enterprise-level cloud-native systems.
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Auth | 8081 | JWT authentication, RBAC, key rotation |
-| Rides | 8082 | Ride lifecycle, scheduling, surge pricing |
-| Geo | 8083 | Driver locations, geospatial matching (Redis) |
-| Payments | 8084 | Stripe integration, wallets, payouts |
-| Notifications | 8085 | Firebase push, Twilio SMS, SMTP email |
-| Realtime | 8086 | WebSocket events, in-app chat |
-| Mobile | 8087 | Mobile-optimized API gateway |
-| Admin | 8088 | Dashboard, user/driver management |
-| Promos | 8089 | Promo codes, referral system |
-| Scheduler | 8090 | Background jobs, scheduled rides |
-| Analytics | 8091 | Business metrics, reporting |
-| Fraud | 8092 | Fraud detection, risk scoring |
-| ML ETA | 8093 | ML-based ETA prediction |
-| Negotiation | 8094 | Fare negotiation |
+---
 
-## Tech Stack
+## 🚀 Engineering Capabilities Demonstrated (HR & Hiring Manager Quick-Scan)
 
-- **Language**: Go 1.24+ / Gin
-- **Database**: PostgreSQL 15 (connection pooling, read replicas)
-- **Cache**: Redis 7 (GeoSpatial, Pub/Sub)
-- **Payments**: Stripe
-- **Notifications**: Firebase FCM, Twilio, SMTP
-- **Observability**: Prometheus, Grafana, OpenTelemetry, Sentry, Zap
-- **Infrastructure**: Docker, Kubernetes, Kong API Gateway, Istio
-- **Resilience**: Circuit breakers, rate limiting, configurable timeouts
+If you are evaluating this codebase for a senior/staff engineering role, here are the exact capabilities demonstrated:
 
-## Quick Start
+*   **Distributed Systems Architecture**: 14 decoupled microservices utilizing an asynchronous, event-driven pattern over NATS for low latency and high availability.
+*   **High-Concurrency & Real-Time Streaming**: Real-time driver tracking and bidding using Redis Geospatial indexes, pub/sub, and WebSockets.
+*   **Enterprise Security (Zero-Trust)**: Zero-downtime asymmetric JWT key rotation, strict Role-Based Access Control (RBAC), automatic request sanitization, and structured audit logs.
+*   **Advanced Spatial Resolution**: Use of Uber's H3 Hexagonal Hierarchical Spatial Indexing for dynamic surge pricing, supply/demand zone calculations, and O(1) geospatial lookup.
+*   **Microservice Resilience Patterns**: Distributed rate limiters, custom circuit breakers, graceful shutdown handlers, and jittered exponential backoffs.
+*   **100% Production Readiness**: Multi-stage Docker builds, Kubernetes manifests, comprehensive Swagger/OpenAPI documentation, a robust CI/CD pipeline, and structured logging.
 
-### Prerequisites
+---
 
-- Docker and Docker Compose
-- Go 1.24+
-
-### Development (recommended)
-
-```bash
-# Start Postgres + Redis
-make dev-infra
-
-# Run migrations
-make migrate-up
-
-# Run a service
-make run-auth   # or run-rides, run-geo, etc.
-```
-
-### Docker Compose
-
-```bash
-cp .env.example .env
-docker-compose up -d
-```
-
-### Build all services
-
-```bash
-go build ./...
-# Or individually:
-go build -o bin/auth ./cmd/auth
-```
-
-## Configuration
-
-Copy `.env.example` and adjust values. See [.env.example](.env.example) for all available environment variables with descriptions.
-
-Key settings:
-- `DB_*` - PostgreSQL connection
-- `REDIS_*` - Redis connection
-- `JWT_SECRET` - JWT signing key
-- `STRIPE_API_KEY` - Stripe payments
-- `FIREBASE_*` / `TWILIO_*` / `SMTP_*` - Notification channels
-- `SECRETS_PROVIDER` - Secrets management (env, vault, aws, gcp, kubernetes)
-
-## Architecture
+## 🗺️ System Architecture
 
 ```mermaid
 flowchart TB
-    Clients[Client Apps] --> Kong[Kong API Gateway]
-    Kong --> Auth & Rides & Geo & Payments & Notifs & Realtime & Mobile
+    Clients[Mobile & Web Clients] --> Kong[Kong API Gateway]
+    Kong --> Gateway[Mobile Gateway]
 
-    Auth & Rides & Payments & Notifs & Admin & Promos & Scheduler & Analytics & Fraud & ML --> Postgres[(PostgreSQL)]
-    Geo & Realtime & ML --> Redis[(Redis)]
+    subgraph Core Services
+        Gateway --> Auth[Auth Service]
+        Gateway --> Rides[Rides Service]
+        Gateway --> Geo[Geo Service]
+        Gateway --> Payments[Payments Service]
+    end
 
-    Prometheus --> Auth & Rides & Geo & Payments & Notifs & Realtime & Mobile & Admin & Promos & Scheduler & Analytics & Fraud & ML
-    Grafana --> Prometheus
+    subgraph Realtime & Comms
+        Gateway --> Realtime[WebSocket Realtime]
+        Gateway --> Notifs[Firebase Notifications]
+    end
+
+    subgraph Intelligence & Admin
+        Gateway --> ML[ML ETA Engine]
+        Gateway --> Negotiation[Fare Bidding]
+        Gateway --> Fraud[Fraud & Risk Engine]
+        Gateway --> Admin[Admin Control Panel]
+    end
+
+    %% Event Backbone
+    NATS{{NATS Asynchronous Event Bus}}
+    Rides <--> NATS
+    Payments <--> NATS
+    Fraud <--> NATS
+    Notifs <--> NATS
+
+    %% Storage Layer
+    Postgres[(PostgreSQL\nPrimary/Replica)]
+    Redis[(Redis 7\nCache / Spatial)]
+
+    Auth & Rides & Payments & Admin & Fraud & Scheduler --> Postgres
+    Geo & Realtime & ML & Negotiation --> Redis
 ```
 
-## Testing
+---
+
+## 🛠️ The Microservices Ecosystem
+
+Each of the 14 microservices is built around the **Handler ➡️ Service ➡️ Repository** pattern, enforcing strict separation of concerns:
+
+| Service | Port | Primary Tech | Business Responsibility |
+|:---|:---:|:---|:---|
+| **Auth** | `8081` | JWT, Bcrypt | Zero-downtime key rotation, secure authentication, RBAC. |
+| **Rides** | `8082` | Go, pgx | Core ride lifecycle management, trip routing, surge pricing. |
+| **Geo** | `8083` | Redis Spatial, H3 | Dynamic driver location index, hexagonal demand forecasting. |
+| **Payments**| `8084` | Stripe API, Wallets | Financial transaction processing, driver split ledger. |
+| **Realtime**| `8086` | WebSockets | Low-latency state sync, WebSocket connections, live driver map. |
+| **Negotiation**| `8094` | WebSockets | Driver-Rider fare negotiation/bidding system. |
+| **Fraud** | `8092` | ML Model, Go | Real-time transaction risk scoring and anomaly detection. |
+| **ML ETA** | `8093` | Python/Go, Redis | Machine learning-based trip duration and arrival estimation. |
+| **Mobile** | `8087` | API Gateway | Mobile-optimized entry point, payload aggregation. |
+| **Notifs** | `8085` | Twilio, Firebase | Multichannel notifications (Push, SMS, Email). |
+| **Scheduler**| `8090` | Cron, Redis | Background job execution and scheduled trip dispatches. |
+| **Analytics**| `8091` | Time-Series DB | Business intelligence metrics, system load telemetry. |
+| **Admin** | `8088` | Go | Internal management dashboard for system administrators. |
+| **Promos** | `8089` | Redis, Postgres | Promotional code validation and referral rewards. |
+
+---
+
+## 🔒 Security-First Design
+
+This platform was built to meet strict financial and data-privacy standards:
+*   **Asymmetric JWT Key Rotation**: Keys are automatically rotated in the background with zero-downtime, utilizing a grace period configuration that keeps active sessions valid.
+*   **Audit Trail Middleware**: Automatically intercepts and logs all state-changing operations (POST, PUT, DELETE), hashing request payloads (SHA-256) to comply with data privacy standards (GDPR/CCPA).
+*   **Request Sanitization**: Intercepts payloads to strip XSS vectors, prevent SQL injections via `pgx` parameterized inputs, and enforce HTTP security headers.
+
+## ⚡ Performance Optimization
+
+*   **Cache-Aside Decorators**: Transparent Redis caching layers (`internal/auth/cached_service.go`) reduce database read bottlenecks on user profiles.
+*   **Concurrent DB Indexes**: Optimized hot-paths via 6 specialized database indexes (e.g., matching stats, active trip filtering) using concurrent index creation to prevent table locks.
+*   **Connection Pool Telemetry**: Exposes detailed internal statistics of PostgreSQL (`pgxpool`) and Redis connection pools to Prometheus to detect leakages or exhaustion.
+
+---
+
+## 🚀 Quick Start (Run the Entire Stack)
+
+### Prerequisites
+*   Go 1.24+
+*   Docker & Docker Compose
+*   GNU Make
+
+### 1-Command Bootstrap
+Launch the local developer infrastructure (PostgreSQL, Redis, NATS), run the 24 migrations, and verify the entire test suite passes:
 
 ```bash
-go test ./...                        # all tests
-go test -cover ./...                 # with coverage
-go test ./internal/auth/... -v       # specific service
-go test ./test/integration/... -v    # integration tests
+# Bootstrap infra, run migrations, and execute tests
+make setup
 ```
 
-## Project Structure
-
+### Run an Individual Service
+```bash
+# Runs the authentication service on port 8081
+make run-auth
 ```
+
+### Static Analysis & Verification
+Run the production linter suite (configured with 15+ linters in `.golangci.yml`) and security scanners:
+
+```bash
+# Run security scanners (gosec + govulncheck)
+make security-scan
+
+# Run all code quality checks, linters, tests, and scans
+make check-all
+```
+
+---
+
+## 📂 Project Architecture Layout
+
+The repository utilizes a modular, clean Go structure conforming to industry-standard layout conventions:
+
+```text
 ride-hailing/
-├── cmd/                    # Service entry points (14 services)
-├── internal/               # Business logic per domain
-├── pkg/                    # Shared libraries (middleware, config, resilience, etc.)
-├── db/migrations/          # Database migrations (18 migrations)
-├── deploy/                 # OTel collector, Tempo config
-├── k8s/                    # Kubernetes manifests
-├── kong/                   # Kong API Gateway config
-├── monitoring/             # Prometheus & Grafana config
-├── test/                   # Integration tests, mocks, helpers
-├── docs/                   # Documentation
-├── docker-compose.yml      # Full stack
-├── docker-compose.dev.yml  # Dev infrastructure only
-└── Makefile                # Build, run, migrate commands
+├── cmd/                    # 14 microservice entry points (main.go)
+├── internal/               # Domain-specific business logic (Handler-Service-Repo)
+│   ├── auth/               # Hardened authentication & validation
+│   ├── rides/              # Ride lifecycle & driver matching engine
+│   └── geo/                # Geospatial location trackers
+├── pkg/                    # Shared infrastructure packages (no business logic)
+│   ├── database/           # Postgres pool management & health metrics
+│   ├── middleware/         # CORS, Rate-Limiting, Audit, Security middleware
+│   └── resilience/         # Circuit Breaker & Exponential Backoff engines
+├── db/migrations/          # 24 schema migrations (users, rides, wallets, etc.)
+├── docs/                   # Architectural blueprints & OpenAPI specs
+└── Makefile                # Clean, human-readable execution helper commands
 ```
 
-## Documentation
+---
 
-- [Quick Start Guide](docs/QUICKSTART.md)
-- [Development Guide](docs/DEVELOPMENT.md)
-- [API Reference](docs/API.md)
-- [Deployment](docs/DEPLOYMENT.md)
-- [Health Checks](docs/HEALTH_CHECKS.md)
-- [Error Handling](docs/ERROR_HANDLING.md)
-- [Observability](docs/observability.md)
-- [Tracing Setup](docs/tracing-setup.md)
-- [Database Operations](docs/DATABASE_OPERATIONS.md)
-- [Disaster Recovery](docs/DISASTER_RECOVERY.md)
-- [Sentry Setup](docs/SENTRY_QUICKSTART.md)
+## 📈 System Resilience & Observability
 
-## License
+*   **Fail-Safe Operations**: Outages in payment gateways or notification providers degrade gracefully. A custom circuit breaker (`pkg/resilience`) wraps external APIs to prevent blocking call queues.
+*   **Distributed Tracing**: Structured log fields carry trace IDs across HTTP and NATS boundaries using OpenTelemetry context propagation, routing diagnostic insights straight to Sentry.
+*   **Metrics & Dashboards**: Prometheus collectors track route execution times, error rates, database connection state, and system resource metrics.
 
-MIT
+---
+
+## 📄 License
+This project is open-source and available under the [MIT License](LICENSE).

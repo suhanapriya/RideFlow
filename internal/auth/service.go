@@ -42,6 +42,12 @@ func (s *Service) Register(ctx context.Context, req *models.RegisterRequest) (*m
 		attribute.String("user.role", string(req.Role)),
 	)
 
+	// Deep input validation
+	if err := ValidateRegisterRequest(req); err != nil {
+		tracing.RecordError(ctx, err)
+		return nil, err
+	}
+
 	// Check if user already exists
 	existingUser, _ := s.repo.GetUserByEmail(ctx, req.Email)
 	if existingUser != nil {
@@ -149,6 +155,12 @@ func (s *Service) Login(ctx context.Context, req *models.LoginRequest) (*models.
 	defer span.End()
 
 	tracing.AddSpanAttributes(ctx, attribute.String("user.email", req.Email))
+
+	// Input validation
+	if err := ValidateLoginRequest(req); err != nil {
+		tracing.RecordError(ctx, err)
+		return nil, err
+	}
 
 	// Get user by email
 	user, err := s.repo.GetUserByEmail(ctx, req.Email)

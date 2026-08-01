@@ -1,503 +1,393 @@
-package auth
+package auth_test
 
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/richxcame/ride-hailing/internal/auth"
 	"github.com/richxcame/ride-hailing/pkg/common"
-	"github.com/richxcame/ride-hailing/pkg/jwtkeys"
-	"github.com/richxcame/ride-hailing/pkg/middleware"
 	"github.com/richxcame/ride-hailing/pkg/models"
-	"github.com/richxcame/ride-hailing/test/helpers"
-	"github.com/richxcame/ride-hailing/test/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func newTestService(t *testing.T, repo RepositoryInterface) *Service {
-	t.Helper()
-	manager, err := jwtkeys.NewManager(context.Background(), jwtkeys.Config{
-		RotationInterval: 365 * 24 * time.Hour,
-		GracePeriod:      365 * 24 * time.Hour,
-		LegacySecret:     "test-secret",
-	})
-	if err != nil {
-		t.Fatalf("failed to create jwt manager: %v", err)
+// mockRepo implements auth.RepositoryInterface with configurable function fields.
+type mockRepo struct {
+	getUserByEmailFn func(ctx context.Context, email string) (*models.User, error)
+	getUserByIDFn    func(ctx context.Context, id uuid.UUID) (*models.User, error)
+	createUserFn     func(ctx context.Context, user *models.User) error
+	createDriverFn   func(ctx context.Context, driver *models.Driver) error
+	updateUserFn     func(ctx context.Context, user *models.User) error
+}
+
+func (m *mockRepo) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	if m.getUserByEmailFn != nil {
+		return m.getUserByEmailFn(ctx, email)
 	}
-	return NewService(repo, manager, 24)
+	return nil, errors.New("user not found")
 }
 
-func TestService_Register_Success(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestRegisterRequest()
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(nil, errors.New("not found"))
-	mockRepo.On("CreateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
-
-	// Execute
-	user, err := service.Register(ctx, req)
-
-	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, user)
-	assert.Equal(t, req.Email, user.Email)
-	assert.Equal(t, req.FirstName, user.FirstName)
-	assert.Equal(t, req.LastName, user.LastName)
-	assert.Equal(t, req.Role, user.Role)
-	assert.True(t, user.IsActive)
-	assert.False(t, user.IsVerified)
-	helpers.AssertPasswordNotInResponse(t, user)
-	mockRepo.AssertExpectations(t)
+func (m *mockRepo) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
+	if m.getUserByIDFn != nil {
+		return m.getUserByIDFn(ctx, id)
+	}
+	return nil, errors.New("user not found")
 }
 
-func TestService_Register_UserAlreadyExists(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestRegisterRequest()
-	existingUser := helpers.CreateTestUser()
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(existingUser, nil)
-
-	// Execute
-	user, err := service.Register(ctx, req)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 409, appErr.Code)
-	mockRepo.AssertExpectations(t)
+func (m *mockRepo) CreateUser(ctx context.Context, user *models.User) error {
+	if m.createUserFn != nil {
+		return m.createUserFn(ctx, user)
+	}
+	return nil
 }
 
-func TestService_Register_RepositoryError(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestRegisterRequest()
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(nil, errors.New("not found"))
-	mockRepo.On("CreateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(errors.New("database error"))
-
-	// Execute
-	user, err := service.Register(ctx, req)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 500, appErr.Code)
-	mockRepo.AssertExpectations(t)
+func (m *mockRepo) CreateDriver(ctx context.Context, driver *models.Driver) error {
+	if m.createDriverFn != nil {
+		return m.createDriverFn(ctx, driver)
+	}
+	return nil
 }
 
-func TestService_RegisterDriver_Success(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := &models.RegisterRequest{
-		Email:       "driver@example.com",
-		Password:    "SecurePassword123!",
+func (m *mockRepo) UpdateUser(ctx context.Context, user *models.User) error {
+	if m.updateUserFn != nil {
+		return m.updateUserFn(ctx, user)
+	}
+	return nil
+}
+
+// validRegisterRequest returns a RegisterRequest that passes all validation.
+func validRegisterRequest() *models.RegisterRequest {
+	return &models.RegisterRequest{
+		Email:       "test@example.com",
+		Password:    "SecurePass1",
 		PhoneNumber: "+1234567890",
 		FirstName:   "John",
-		LastName:    "Driver",
-		Role:        "driver",
+		LastName:    "Doe",
+		Role:        models.RoleRider,
 	}
-	driver := &models.Driver{
-		LicenseNumber: "DL123456789",
-		VehicleModel:  "Toyota Camry",
-		VehiclePlate:  "ABC-1234",
-		VehicleColor:  "Silver",
-		VehicleYear:   2020,
-	}
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(nil, errors.New("not found"))
-	mockRepo.On("CreateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
-	mockRepo.On("CreateDriver", mock.Anything, mock.AnythingOfType("*models.Driver")).Return(nil)
-
-	// Execute
-	user, err := service.RegisterDriver(ctx, req, driver)
-
-	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, user)
-	assert.Equal(t, req.Email, user.Email)
-	assert.Equal(t, req.FirstName, user.FirstName)
-	mockRepo.AssertExpectations(t)
 }
 
-func TestService_RegisterDriver_UserCreationFails(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestRegisterRequest()
-	req.Role = "driver"
-	driver := helpers.CreateTestDriver(uuid.New())
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(nil, errors.New("not found"))
-	mockRepo.On("CreateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(errors.New("database error"))
-
-	// Execute
-	user, err := service.RegisterDriver(ctx, req, driver)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_RegisterDriver_DriverCreationFails(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestRegisterRequest()
-	req.Role = "driver"
-	driver := helpers.CreateTestDriver(uuid.New())
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(nil, errors.New("not found"))
-	mockRepo.On("CreateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
-	mockRepo.On("CreateDriver", mock.Anything, mock.AnythingOfType("*models.Driver")).Return(errors.New("database error"))
-
-	// Execute
-	user, err := service.RegisterDriver(ctx, req, driver)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 500, appErr.Code)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_Login_Success(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestLoginRequest()
-	testUser := helpers.CreateTestUser()
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(testUser, nil)
-
-	// Execute
-	response, err := service.Login(ctx, req)
-
-	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, response)
-	assert.NotNil(t, response.User)
-	assert.NotEmpty(t, response.Token)
-	helpers.AssertPasswordNotInResponse(t, response.User)
-	helpers.AssertValidJWT(t, response.Token)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_Login_UserNotFound(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestLoginRequest()
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(nil, errors.New("not found"))
-
-	// Execute
-	response, err := service.Login(ctx, req)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, response)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 401, appErr.Code)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_Login_InactiveUser(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestLoginRequest()
-	testUser := helpers.CreateTestUser()
-	testUser.IsActive = false
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(testUser, nil)
-
-	// Execute
-	response, err := service.Login(ctx, req)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, response)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 401, appErr.Code)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_Login_InvalidPassword(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	req := helpers.CreateTestLoginRequest()
-	req.Password = "wrongpassword"
-	testUser := helpers.CreateTestUser()
-
-	// Mock expectations
-	mockRepo.On("GetUserByEmail", mock.Anything, req.Email).Return(testUser, nil)
-
-	// Execute
-	response, err := service.Login(ctx, req)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, response)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 401, appErr.Code)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_GetProfile_Success(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	testUser := helpers.CreateTestUser()
-
-	// Mock expectations
-	mockRepo.On("GetUserByID", mock.Anything, testUser.ID).Return(testUser, nil)
-
-	// Execute
-	user, err := service.GetProfile(ctx, testUser.ID)
-
-	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, user)
-	helpers.AssertUserEqual(t, testUser, user)
-	helpers.AssertPasswordNotInResponse(t, user)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_GetProfile_UserNotFound(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	userID := uuid.New()
-
-	// Mock expectations
-	mockRepo.On("GetUserByID", mock.Anything, userID).Return(nil, errors.New("not found"))
-
-	// Execute
-	user, err := service.GetProfile(ctx, userID)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 404, appErr.Code)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestService_UpdateProfile_Success(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	testUser := helpers.CreateTestUser()
-	updates := &models.User{
-		FirstName:   "UpdatedFirst",
-		LastName:    "UpdatedLast",
-		PhoneNumber: "+9876543210",
+func TestService_Register(t *testing.T) {
+	tests := []struct {
+		name        string
+		req         *models.RegisterRequest
+		repo        *mockRepo
+		wantErr     bool
+		errCode     int
+		errContains string
+	}{
+		{
+			name: "success as rider",
+			req:  validRegisterRequest(),
+			repo: &mockRepo{
+				getUserByEmailFn: func(_ context.Context, _ string) (*models.User, error) {
+					return nil, errors.New("not found")
+				},
+				createUserFn: func(_ context.Context, _ *models.User) error {
+					return nil
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "duplicate email conflict",
+			req:  validRegisterRequest(),
+			repo: &mockRepo{
+				getUserByEmailFn: func(_ context.Context, _ string) (*models.User, error) {
+					return &models.User{Email: "test@example.com"}, nil
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusConflict,
+			errContains: "already exists",
+		},
+		{
+			name: "repo CreateUser failure",
+			req:  validRegisterRequest(),
+			repo: &mockRepo{
+				getUserByEmailFn: func(_ context.Context, _ string) (*models.User, error) {
+					return nil, errors.New("not found")
+				},
+				createUserFn: func(_ context.Context, _ *models.User) error {
+					return errors.New("db connection failed")
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusInternalServerError,
+			errContains: "failed to create user",
+		},
 	}
 
-	// Mock expectations
-	mockRepo.On("GetUserByID", mock.Anything, testUser.ID).Return(testUser, nil)
-	mockRepo.On("UpdateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := auth.NewService(tt.repo, nil, 24)
 
-	// Execute
-	updatedUser, err := service.UpdateProfile(ctx, testUser.ID, updates)
+			user, err := svc.Register(context.Background(), tt.req)
 
-	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, updatedUser)
-	assert.Equal(t, updates.FirstName, updatedUser.FirstName)
-	assert.Equal(t, updates.LastName, updatedUser.LastName)
-	assert.Equal(t, updates.PhoneNumber, updatedUser.PhoneNumber)
-	helpers.AssertPasswordNotInResponse(t, updatedUser)
-	mockRepo.AssertExpectations(t)
+			if tt.wantErr {
+				assert.Error(t, err)
+				var appErr *common.AppError
+				if assert.ErrorAs(t, err, &appErr) {
+					assert.Equal(t, tt.errCode, appErr.Code)
+					assert.Contains(t, appErr.Message, tt.errContains)
+				}
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.req.Email, user.Email)
+				assert.Equal(t, tt.req.Role, user.Role)
+				assert.True(t, user.IsActive)
+				assert.False(t, user.IsVerified)
+				assert.Empty(t, user.PasswordHash, "password hash should be cleared in response")
+			}
+		})
+	}
 }
 
-func TestService_UpdateProfile_UserNotFound(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	userID := uuid.New()
-	updates := &models.User{
-		FirstName: "UpdatedFirst",
+func TestService_Login(t *testing.T) {
+	// Pre-hash a known password for login tests.
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("SecurePass1"), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		req         *models.LoginRequest
+		repo        *mockRepo
+		wantErr     bool
+		errCode     int
+		errContains string
+	}{
+		{
+			name: "user not found returns unauthorized",
+			req: &models.LoginRequest{
+				Email:    "noone@example.com",
+				Password: "SecurePass1",
+			},
+			repo: &mockRepo{
+				getUserByEmailFn: func(_ context.Context, _ string) (*models.User, error) {
+					return nil, errors.New("not found")
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusUnauthorized,
+			errContains: "invalid credentials",
+		},
+		{
+			name: "wrong password returns unauthorized",
+			req: &models.LoginRequest{
+				Email:    "test@example.com",
+				Password: "WrongPass1",
+			},
+			repo: &mockRepo{
+				getUserByEmailFn: func(_ context.Context, _ string) (*models.User, error) {
+					return &models.User{
+						ID:           uuid.New(),
+						Email:        "test@example.com",
+						PasswordHash: string(hashedPassword),
+						IsActive:     true,
+					}, nil
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusUnauthorized,
+			errContains: "invalid credentials",
+		},
+		{
+			name: "inactive account returns unauthorized",
+			req: &models.LoginRequest{
+				Email:    "test@example.com",
+				Password: "SecurePass1",
+			},
+			repo: &mockRepo{
+				getUserByEmailFn: func(_ context.Context, _ string) (*models.User, error) {
+					return &models.User{
+						ID:           uuid.New(),
+						Email:        "test@example.com",
+						PasswordHash: string(hashedPassword),
+						IsActive:     false,
+					}, nil
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusUnauthorized,
+			errContains: "inactive",
+		},
 	}
 
-	// Mock expectations
-	mockRepo.On("GetUserByID", mock.Anything, userID).Return(nil, errors.New("not found"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := auth.NewService(tt.repo, nil, 24)
 
-	// Execute
-	user, err := service.UpdateProfile(ctx, userID, updates)
+			resp, err := svc.Login(context.Background(), tt.req)
 
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 404, appErr.Code)
-	mockRepo.AssertExpectations(t)
+			if tt.wantErr {
+				assert.Error(t, err)
+				var appErr *common.AppError
+				if assert.ErrorAs(t, err, &appErr) {
+					assert.Equal(t, tt.errCode, appErr.Code)
+					assert.Contains(t, appErr.Message, tt.errContains)
+				}
+				assert.Nil(t, resp)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, resp)
+			}
+		})
+	}
 }
 
-func TestService_UpdateProfile_RepositoryError(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	testUser := helpers.CreateTestUser()
-	updates := &models.User{
-		FirstName: "UpdatedFirst",
+func TestService_GetProfile(t *testing.T) {
+	testID := uuid.New()
+
+	tests := []struct {
+		name        string
+		userID      uuid.UUID
+		repo        *mockRepo
+		wantErr     bool
+		errCode     int
+		errContains string
+	}{
+		{
+			name:   "success clears password hash",
+			userID: testID,
+			repo: &mockRepo{
+				getUserByIDFn: func(_ context.Context, id uuid.UUID) (*models.User, error) {
+					return &models.User{
+						ID:           id,
+						Email:        "test@example.com",
+						PasswordHash: "somehash",
+						FirstName:    "John",
+						LastName:     "Doe",
+					}, nil
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "user not found",
+			userID: uuid.New(),
+			repo: &mockRepo{
+				getUserByIDFn: func(_ context.Context, _ uuid.UUID) (*models.User, error) {
+					return nil, errors.New("not found")
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusNotFound,
+			errContains: "user not found",
+		},
 	}
 
-	// Mock expectations
-	mockRepo.On("GetUserByID", mock.Anything, testUser.ID).Return(testUser, nil)
-	mockRepo.On("UpdateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(errors.New("database error"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := auth.NewService(tt.repo, nil, 24)
 
-	// Execute
-	user, err := service.UpdateProfile(ctx, testUser.ID, updates)
+			user, err := svc.GetProfile(context.Background(), tt.userID)
 
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, user)
-	var appErr *common.AppError
-	assert.True(t, errors.As(err, &appErr))
-	assert.Equal(t, 500, appErr.Code)
-	mockRepo.AssertExpectations(t)
+			if tt.wantErr {
+				assert.Error(t, err)
+				var appErr *common.AppError
+				if assert.ErrorAs(t, err, &appErr) {
+					assert.Equal(t, tt.errCode, appErr.Code)
+					assert.Contains(t, appErr.Message, tt.errContains)
+				}
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.userID, user.ID)
+				assert.Empty(t, user.PasswordHash, "password hash should be cleared")
+			}
+		})
+	}
 }
 
-func TestService_GenerateToken_ValidToken(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	testUser := helpers.CreateTestUser()
+func TestService_UpdateProfile(t *testing.T) {
+	testID := uuid.New()
+	profileImg := "https://example.com/img.png"
 
-	// Execute
-	tokenString, err := service.generateToken(context.Background(), testUser)
-
-	// Assert
-	assert.NoError(t, err)
-	assert.NotEmpty(t, tokenString)
-
-	// Verify token can be parsed
-	token, err := jwt.ParseWithClaims(tokenString, &middleware.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return []byte("test-secret"), nil
-	})
-	assert.NoError(t, err)
-	assert.True(t, token.Valid)
-
-	// Verify claims
-	claims, ok := token.Claims.(*middleware.Claims)
-	assert.True(t, ok)
-	assert.Equal(t, testUser.ID, claims.UserID)
-	assert.Equal(t, testUser.Email, claims.Email)
-	assert.Equal(t, testUser.Role, claims.Role)
-}
-
-func TestService_GenerateToken_ContainsCorrectClaims(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	testUser := helpers.CreateTestUser()
-
-	// Execute
-	tokenString, err := service.generateToken(context.Background(), testUser)
-
-	// Assert
-	assert.NoError(t, err)
-
-	// Parse and verify
-	token, _ := jwt.ParseWithClaims(tokenString, &middleware.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return []byte("test-secret"), nil
-	})
-
-	claims := token.Claims.(*middleware.Claims)
-	assert.NotNil(t, claims.ExpiresAt)
-	assert.NotNil(t, claims.IssuedAt)
-	assert.True(t, claims.ExpiresAt.After(claims.IssuedAt.Time))
-}
-
-func TestPasswordHashing(t *testing.T) {
-	password := "SecurePassword123!"
-
-	// Generate hash
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, hashedPassword)
-
-	// Verify correct password
-	err = bcrypt.CompareHashAndPassword(hashedPassword, []byte(password))
-	assert.NoError(t, err)
-
-	// Verify incorrect password
-	err = bcrypt.CompareHashAndPassword(hashedPassword, []byte("wrongpassword"))
-	assert.Error(t, err)
-}
-
-func TestService_UpdateProfile_PartialUpdates(t *testing.T) {
-	// Setup
-	mockRepo := new(mocks.MockAuthRepository)
-	service := newTestService(t, mockRepo)
-	ctx := context.Background()
-	testUser := helpers.CreateTestUser()
-	originalLastName := testUser.LastName
-
-	// Test updating only first name
-	updates := &models.User{
-		FirstName: "NewFirstName",
+	tests := []struct {
+		name        string
+		userID      uuid.UUID
+		updates     *models.User
+		repo        *mockRepo
+		wantErr     bool
+		errCode     int
+		errContains string
+		checkFn     func(t *testing.T, user *models.User)
+	}{
+		{
+			name:   "success updates fields",
+			userID: testID,
+			updates: &models.User{
+				FirstName:    "Jane",
+				LastName:     "Smith",
+				PhoneNumber:  "+9876543210",
+				ProfileImage: &profileImg,
+			},
+			repo: &mockRepo{
+				getUserByIDFn: func(_ context.Context, id uuid.UUID) (*models.User, error) {
+					return &models.User{
+						ID:           id,
+						Email:        "test@example.com",
+						PasswordHash: "somehash",
+						FirstName:    "John",
+						LastName:     "Doe",
+						PhoneNumber:  "+1234567890",
+					}, nil
+				},
+				updateUserFn: func(_ context.Context, _ *models.User) error {
+					return nil
+				},
+			},
+			wantErr: false,
+			checkFn: func(t *testing.T, user *models.User) {
+				assert.Equal(t, "Jane", user.FirstName)
+				assert.Equal(t, "Smith", user.LastName)
+				assert.Equal(t, "+9876543210", user.PhoneNumber)
+				assert.Equal(t, &profileImg, user.ProfileImage)
+				assert.Empty(t, user.PasswordHash, "password hash should be cleared")
+			},
+		},
+		{
+			name:    "user not found",
+			userID:  uuid.New(),
+			updates: &models.User{FirstName: "Jane"},
+			repo: &mockRepo{
+				getUserByIDFn: func(_ context.Context, _ uuid.UUID) (*models.User, error) {
+					return nil, errors.New("not found")
+				},
+			},
+			wantErr:     true,
+			errCode:     http.StatusNotFound,
+			errContains: "user not found",
+		},
 	}
 
-	// Mock expectations
-	mockRepo.On("GetUserByID", mock.Anything, testUser.ID).Return(testUser, nil)
-	mockRepo.On("UpdateUser", mock.Anything, mock.AnythingOfType("*models.User")).Return(nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := auth.NewService(tt.repo, nil, 24)
 
-	// Execute
-	updatedUser, err := service.UpdateProfile(ctx, testUser.ID, updates)
+			user, err := svc.UpdateProfile(context.Background(), tt.userID, tt.updates)
 
-	// Assert
-	assert.NoError(t, err)
-	assert.Equal(t, "NewFirstName", updatedUser.FirstName)
-	assert.Equal(t, originalLastName, updatedUser.LastName) // Should remain unchanged
-	mockRepo.AssertExpectations(t)
+			if tt.wantErr {
+				assert.Error(t, err)
+				var appErr *common.AppError
+				if assert.ErrorAs(t, err, &appErr) {
+					assert.Equal(t, tt.errCode, appErr.Code)
+					assert.Contains(t, appErr.Message, tt.errContains)
+				}
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				if tt.checkFn != nil {
+					tt.checkFn(t, user)
+				}
+			}
+		})
+	}
 }

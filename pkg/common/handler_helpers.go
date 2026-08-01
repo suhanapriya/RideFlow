@@ -1,6 +1,8 @@
 package common
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -201,9 +203,60 @@ func ValidateInRange(c *gin.Context, value, min, max float64, fieldName string) 
 
 // formatFloat formats a float64 for display in error messages
 func formatFloat(f float64) string {
-	if f == float64(int64(f)) {
-		return string(rune(int64(f) + '0'))
+	return fmt.Sprintf("%g", f)
+}
+
+// HandleServiceCall wraps a service call with consistent error mapping
+func HandleServiceCall[T any](c *gin.Context, result T, err error, status ...int) {
+	if err != nil {
+		if appErr, ok := err.(*AppError); ok {
+			AppErrorResponse(c, appErr)
+			return
+		}
+		ErrorResponse(c, http.StatusInternalServerError, "Internal server error")
+		return
 	}
-	// Simple formatting for common cases
-	return string(rune(int64(f)))
+	
+	statusCode := http.StatusOK
+	if len(status) > 0 {
+		statusCode = status[0]
+	}
+	
+	if statusCode == http.StatusOK {
+		SuccessResponse(c, result)
+	} else if statusCode == http.StatusCreated {
+		CreatedResponse(c, result)
+	} else {
+		SuccessResponseWithStatus(c, statusCode, result, "success")
+	}
+}
+
+// HandleServiceCallCreated handles a service call and returns 201 Created on success
+func HandleServiceCallCreated[T any](c *gin.Context, result T, err error) {
+	HandleServiceCall(c, result, err, http.StatusCreated)
+}
+
+// HandleServiceCallNoContent handles operations that return no data
+func HandleServiceCallNoContent(c *gin.Context, err error) {
+	if err != nil {
+		if appErr, ok := err.(*AppError); ok {
+			AppErrorResponse(c, appErr)
+			return
+		}
+		ErrorResponse(c, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// BindAndHandle combines JSON binding + service call in one step
+func BindAndHandle[Req any, Res any](c *gin.Context, serviceFn func(context.Context, Req) (Res, error)) {
+	var req Req
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ErrorResponse(c, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+	
+	result, err := serviceFn(c.Request.Context(), req)
+	HandleServiceCall(c, result, err)
 }

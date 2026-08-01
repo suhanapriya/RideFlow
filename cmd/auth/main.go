@@ -26,14 +26,11 @@ import (
 
 const (
 	serviceName = "auth-service"
-	version     = "1.0.0"
 )
 
+var version = "1.0.0"
+
 func main() {
-	// Set default port for auth service if not set
-	if os.Getenv("PORT") == "" {
-		os.Setenv("PORT", "8081")
-	}
 	// Load configuration
 	cfg, err := config.Load(serviceName)
 	if err != nil {
